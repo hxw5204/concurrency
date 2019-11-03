@@ -14,6 +14,11 @@ typedef struct {
     // DO NOT REMOVE queue (OR CHANGE ITS NAME) FROM THE STRUCT
     // YOU MUST USE queue TO STORE YOUR QUEUEERED JOBS 
     queue_t* queue;
+    int status;
+    int count;
+    list_t* list;
+    void** unqueue;
+    
     /* ADD ANY STRUCT ENTRIES YOU NEED HERE */
     /* IMPLEMENT THIS */
 } driver_t;

@@ -1,6 +1,9 @@
 #include "driver.h"
 
 sem_t sem_driver;
+sem_t full;
+sem_t empty;
+pthread_mutex_t mutex;
 
 /*
 	Creates a new driver with the provided job queue size and returns it to the caller function.
@@ -9,21 +12,20 @@ sem_t sem_driver;
 driver_t* driver_create(size_t size){
 	/* IMPLEMENT THIS */
 
-	driver_t* newDriver = NULL;
-	if (size == 0 ){
+	driver_t* newDriver = (driver_t*)malloc(sizeof(driver_t));
+	newDriver->queue = queue_create(size);
+	newDriver->status = SUCCESS;
+	//newDriver->count = 0;
+	//newDriver->list = NULL;
 
-		// unqueued driver
-		newDriver->queue->capacity = 0;
-		newDriver->queue->job = NULL;
-		newDriver->queue->next = 0;
-		newDriver->queue->size = 0;
+	pthread_mutex_init(&mutex, NULL);
+	sem_init(&empty, 0, 1);
+	sem_init(&full, 0, 0);
 
-	}else if (size > 0){
-
-		// queued driver
-		newDriver->queue = queue_create(sizeof(queue_t));
-
+	if(size == 0){
+		newDriver->unqueue=NULL;
 	}
+	
 	return newDriver;
 }
 
@@ -38,8 +40,27 @@ driver_t* driver_create(size_t size){
 enum driver_status driver_schedule(driver_t *driver, void* job) {
 	/* IMPLEMENT THIS */
 
+	if (!driver->queue){
 
+		return DRIVER_CLOSED_ERROR;
+	}
+	while(1){
 
+		// -1 from sem, if the sem is not 0
+		sem_wait(&empty); 
+		pthread_mutex_lock(&mutex);// blocking lock
+		
+		//  if successful have mutex, then remove job
+		if (queue_remove(driver->queue, job) == QUEUE_SUCCESS){
+			pthread_mutex_unlock(&mutex); // unlock
+			driver->status = SUCCESS;
+			return SUCCESS;
+		}else{
+			pthread_mutex_unlock(&mute);
+			driver->status = DRIVER_GEN_ERROR;
+			return DRIVER_GEN_ERROR;
+		}
+	}
 }
 
 
