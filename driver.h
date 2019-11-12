@@ -9,15 +9,28 @@
 #include "linked_list.h"
 #include <stddef.h> 
 #include <string.h>
+#include <errno.h>
 
 typedef struct {
     // DO NOT REMOVE queue (OR CHANGE ITS NAME) FROM THE STRUCT
     // YOU MUST USE queue TO STORE YOUR QUEUEERED JOBS 
     queue_t* queue;
-    int status;
-    int count;
-    list_t* list;
-    void** unqueue;
+
+    //int status; //int count; //list_t* list;
+    int r_wait;
+    int w_wait;
+
+    // Unqueued driver
+    void* unqueueJob;
+    pthread_mutex_t schedule_mutex;
+    pthread_mutex_t handle_mutex;
+
+    //Shared Zone
+    pthread_mutex_t mutex;
+    pthread_cond_t handle_cv;
+    pthread_cond_t schedule_cv;
+
+    int driver_closed;
     
     /* ADD ANY STRUCT ENTRIES YOU NEED HERE */
     /* IMPLEMENT THIS */

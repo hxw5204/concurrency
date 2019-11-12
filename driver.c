@@ -22,10 +22,9 @@ driver_t* driver_create(size_t size){
 	sem_init(&empty, 0, 1);
 	sem_init(&full, 0, 0);
 
-	if(size == 0){
-		newDriver->unqueue=NULL;
-	}
 	
+	newDriver->unqueueJob=NULL;
+
 	return newDriver;
 }
 
@@ -49,7 +48,6 @@ enum driver_status driver_schedule(driver_t *driver, void* job) {
 		return DRIVER_CLOSED_ERROR;
 	}
 	while(1){
-
 		
 		// -1 from sem, if the sem is not 0
 		sem_wait(&empty); 
@@ -138,7 +136,7 @@ enum driver_status driver_non_blocking_schedule(driver_t *driver, void* job) {
 		if ((ret == -1) && (errno == EAGAIN)){
 			driver->status = DRIVER_REQUEST_FULL;
 			return DRIVER_REQUEST_FULL;
-		}else if((errno == EINTR) || (erron == EINVAL)){
+		}else if((ret == -1) && ((errno == EINTR) || (errno == EINVAL))){
 			driver->status = DRIVER_GEN_ERROR;
 			return DRIVER_GEN_ERROR;
 		}else{
@@ -188,7 +186,7 @@ enum driver_status driver_non_blocking_handle(driver_t *driver, void **job) {
 		if((ret == -1) && (errno == EAGAIN)){
 			driver->status = DRIVER_REQUEST_EMPTY;
 			return DRIVER_REQUEST_EMPTY;
-		}else if ((errno == EINTR) || (errno == EINVAL)){
+		}else if ((ret == -1) && ((errno == EINTR) || (errno == EINVAL))){
 			driver->status = DRIVER_GEN_ERROR;
 			return DRIVER_GEN_ERROR;
 		}else{

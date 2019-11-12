@@ -716,3 +716,4 @@ ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDwo8Digigl9FkDehmbB8aUTBqIYGnySLQkhwmOG1Ep
 [159691.672975] 	 (t=693410 jiffies g=49714 c=49713 q=14)
 [159691.696175] rcu_sched kthread starved for 693410 jiffies! g49714 c49713 f0x0 s3 ->state=0x1
 [178011.295937] NMI watchdog: BUG: soft lockup - CPU#0 stuck for 17045s! [unattended-upgr:12723]
+[644687.015465] NMI watchdog: BUG: soft lockup - CPU#0 stuck for 30s! [apport:20448]
