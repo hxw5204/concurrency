@@ -220,6 +220,15 @@ enum driver_status driver_non_blocking_schedule(driver_t *driver, void* job) {
 		return DRIVER_CLOSED_ERROR;
 	}
 
+	if(driver->queue->size == driver->queue->capacity){
+		pthread_mutex_unlock(&driver_>mutex);
+		return DRIVER_REQUEST_FULL;
+	}else if((driver->queue->size) < (driver->queue->capacity)){
+		pthread_mutex_unlock(&driver->mutex);
+		queue_add(driver->queue, job);
+	}
+
+	return SUCCESS;
 }
 
 
@@ -235,6 +244,7 @@ enum driver_status driver_non_blocking_schedule(driver_t *driver, void* job) {
 */
 enum driver_status driver_non_blocking_handle(driver_t *driver, void **job) {
 	/* IMPLEMENT THIS */
+	/*
 	int ret;
 	if (!driver){
 		return DRIVER_GEN_ERROR;
@@ -270,6 +280,27 @@ enum driver_status driver_non_blocking_handle(driver_t *driver, void **job) {
 			}
 		}
 	}
+	*/
+
+	pthread_mutex_lock(&driver->mutex);
+	if (driver->queue->size == 0){
+		pthread_mutex_unlock(&driver->mutex);
+		return DRIVER_REQUEST_EMPTY;
+	}
+
+	if(driver->driver_closed){
+		pthread_mutex_unlock(&driver->mutex);
+		return DRIVER_CLOSED_ERROR;
+	}
+
+	if(queue_remove(driver->queue,job) == QUEUE_ERROR){
+		pthread_mutex_unlock(&driver->mutex);
+		return DRIVER_GEN_ERROR;
+	}
+	pthread_cond_signal(&driver->schedule_cv);
+	pthread_mutex_unlock(&driver->mutex);
+
+	return SUCCESS;
 }
 
 
@@ -283,6 +314,18 @@ enum driver_status driver_non_blocking_handle(driver_t *driver, void **job) {
 enum driver_status driver_close(driver_t *driver) {
 	/* IMPLEMENT THIS */
 
+	pthread_mutex_lock(&driver->mutex);
+	if (driver->driver_closed){
+		pthread_mutex_unlock(&driver->mutex);
+		return DRIVER_GEN_ERROR;
+	}
+
+	driver->driver_closed=1;
+	pthread_cond_broadcast(&driver->handle_cv);
+	pthread_cond_broadcast(&driver->schedule_cv);
+	pthread_mutex_unlock(&driver->mutex);
+
+	return SUCCESS;
 }
 
 /*
@@ -295,10 +338,20 @@ enum driver_status driver_close(driver_t *driver) {
 */
 enum driver_status driver_destroy(driver_t *driver) {
 	/* IMPLEMENT THIS */
+
+	/*
 	sem_destroy(&full);
 	sem_destroy(&empty);
 	pthread_mutex_destroy(&mutex);
 	free(driver);
+	*/
+
+	if(!(driver->driver_closed)){
+		return DRIVER_DESTROY_ERROR;
+	}
+
+	pthread_mutex_destroy(&driver -> mutex);
+	pthread_conddestroy
 
 }
 
