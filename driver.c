@@ -3,7 +3,6 @@
 //sem_t sem_driver;
 sem_t full;
 sem_t empty;
-pthread_mutex_t mutex;
 
 /*
 	Creates a new driver with the provided job queue size and returns it to the caller function.
@@ -14,16 +13,20 @@ driver_t* driver_create(size_t size){
 
 	driver_t* newDriver = (driver_t*)malloc(sizeof(driver_t));
 	newDriver->queue = queue_create(size);
-	newDriver->status = SUCCESS;
+
+	//newDriver->status = SUCCESS;
 	//newDriver->count = 0;
 	//newDriver->list = NULL;
 
-	pthread_mutex_init(&mutex, NULL);
-	sem_init(&empty, 0, 1);
-	sem_init(&full, 0, 0);
+	pthread_mutex_init(&newDriver->mutex, NULL);
+	pthread_cond_init(&newDriver->handle_cv, NULL);
+	pthread_cond_init(&newDriver->schedule_cv, NULL);
 
+	//sem_init(&empty, 0, 1);
+	//sem_init(&full, 0, 0);
 	
-	newDriver->unqueueJob=NULL;
+	newDriver->unqueueJob = NULL;
+	newDriver->driver_closed = 0;
 
 	return newDriver;
 }
@@ -39,6 +42,7 @@ driver_t* driver_create(size_t size){
 enum driver_status driver_schedule(driver_t *driver, void* job) {
 	/* IMPLEMENT THIS */
 
+	/*
 	if (!driver){
 		return DRIVER_GEN_ERROR;
 	}
@@ -48,7 +52,7 @@ enum driver_status driver_schedule(driver_t *driver, void* job) {
 		return DRIVER_CLOSED_ERROR;
 	}
 	while(1){
-		
+
 		// -1 from sem, if the sem is not 0
 		sem_wait(&empty); 
 		pthread_mutex_lock(&mutex);// blocking lock
@@ -65,6 +69,32 @@ enum driver_status driver_schedule(driver_t *driver, void* job) {
 			return DRIVER_GEN_ERROR;
 		}
 	}
+	*/
+
+	pthread_mutex_lock(&driver->mutex);
+
+	if (!driver){
+		return DRIVER_GEN_ERROR;
+	}
+
+	if(driver->driver_closed){
+		pthread_mutex_unlock(&driver->mutex);
+		return DRIVER_CLOSED_ERROR;
+	}
+	while(queue_current_size(driver->queue) == queue_capacity(driver->queue)){
+		pthread_cond_wait(&driver->schedule_cv, &driver->mutex);
+
+		if(driver->driver_closed){
+			pthread_mutex_unlock(&driver->mutex);
+			return DRIVER_CLOSED_ERROR;
+		}
+	}
+
+	queue_add(driver->queue, job);
+	pthread_cond_signal(&driver->handle_cv);
+	pthread_mutex_unlock(&driver->mutex);
+
+	return SUCCESS;
 }
 
 
@@ -80,9 +110,12 @@ enum driver_status driver_schedule(driver_t *driver, void* job) {
 */
 enum driver_status driver_handle(driver_t *driver, void **job) {
 	/* IMPLEMENT THIS */
+
+	
 	if (!driver){
 		return DRIVER_GEN_ERROR;
 	}
+	/*
 	if (driver->status == DRIVER_CLOSED_ERROR){
 
 		return DRIVER_CLOSED_ERROR;
@@ -107,6 +140,23 @@ enum driver_status driver_handle(driver_t *driver, void **job) {
 			return DRIVER_GEN_ERROR;
 		}
 	}
+	*/
+
+	pthread_mutex_lock(&driver->mutex);
+	if(driver -> driver_closed){
+		pthread_mutex_unlock(&driver->mutex);
+		return DRIVER_CLOSED_ERROR;
+	}
+
+	while(queue_current_size(driver->queue) == 0){
+		pthread_cond_wait(&driver->handle_cv, &driver->mutex);
+	}
+
+	queue_remove(driver->queue, job);
+	pthread_cond_signal(&driver->schedule_cv);
+	pthread_mutex_unlock(&driver->mutex);
+
+	return SUCCESS;
 }
 
 
@@ -121,7 +171,9 @@ enum driver_status driver_handle(driver_t *driver, void **job) {
 */
 enum driver_status driver_non_blocking_schedule(driver_t *driver, void* job) {
 	/* IMPLEMENT THIS */
+
 	int ret;
+	/*
 	if (!driver){
 		return DRIVER_GEN_ERROR;
 	}
@@ -155,6 +207,19 @@ enum driver_status driver_non_blocking_schedule(driver_t *driver, void* job) {
 			}
 		}
 	}
+	*/
+	pthread_mutex_lock(&driver ->mutex);
+
+	if(!driver){
+		pthread_mutex_unlock(&driver->mutex);
+		return DRIVER_DESTROY_ERROR;
+	}
+
+	if(driver->driver_closed){
+		pthread_mutex_unlock(&driver->mutex);
+		return DRIVER_CLOSED_ERROR;
+	}
+
 }
 
 
@@ -256,3 +321,4 @@ enum driver_status driver_destroy(driver_t *driver) {
 enum driver_status driver_select(select_t *driver_list, size_t driver_count, size_t* selected_index) {
 	/* IMPLEMENT THIS */
 }
+
