@@ -351,7 +351,11 @@ enum driver_status driver_destroy(driver_t *driver) {
 	}
 
 	pthread_mutex_destroy(&driver -> mutex);
-	pthread_conddestroy
+	pthread_cond_destroy(&driver->schedule_cv);
+	pthread_cond_destroy(&driver->handle_cv);
+	queue_free(driver->queue);
+	free(driver);
+	return SUCCESS;
 
 }
 
@@ -373,5 +377,43 @@ enum driver_status driver_destroy(driver_t *driver) {
 */
 enum driver_status driver_select(select_t *driver_list, size_t driver_count, size_t* selected_index) {
 	/* IMPLEMENT THIS */
+	pthread_mutex_t select_mutex;
+	pthread_mutex_lock(&select_mutex);
+	size_t i;
+
+	while(1){
+		for(i = 0; i<driver_count; i++){
+			driver_t* driver = driver_list[i].driver;
+			pthread_mutex_lock(&driver->mutex);
+
+			if(driver->driver_closed){
+				pthread_mutex_unlock(&driver->mutex);
+				pthread_mutex_unlock(&select_mutex);
+				return DRIVER_CLOSED_ERROR;
+			}
+
+			if(driver_list[i].op == SCHDLE){
+
+				
+				if(driver->queue->size < driver->queue->capacity){
+					*selected_index = i;
+					pthread_mutex_unlock(&select_mutex);
+					pthread_mutex_unlock(&driver->mutex);
+					return driver_non_blocking_schedule(driver, driver_list[i].job);
+				}
+			}else if(driver_list[i].op == HANDLE){
+
+				if (driver->queue->size > 0){
+					*selected_index = i;
+					pthread_mutex_unlock(&select_mutex);
+					pthread_mutex_unlock(&driver->mutex);
+
+					return driver_non_blocking_handle(driver, &(driver_list[i].job));
+				}
+
+			}
+		}
+		pthread_cond_wait(&driver->schedule_cv, &select_mutex);
+	}
 }
 
