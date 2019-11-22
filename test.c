@@ -177,6 +177,152 @@ void* average_cpu_utilization(cpu_args* myargs) {
 	return NULL;
 }
 
+static char* test_single_thread_schedule_handle() {
+	print_test_details(__func__, "Testing the single thread schedule handle correctness");
+        size_t capacity = 2;
+        driver_t* driver = driver_create(capacity);
+
+        pthread_t pid;
+
+        sem_t schedule_done;
+        sem_init(&schedule_done, 0, 0);
+        // Send first Message
+        schedule_args *new_args = create_object_for_schedule_api(driver, "Message1", &schedule_done);
+        pthread_create(&pid, NULL, (void *)helper_schedule, new_args);
+
+        // wait before checking if its still blocking
+        sem_wait(&schedule_done);
+
+        mu_assert("test_single_thread_schedule_handle: Testing driver size failed" , queue_current_size(driver->queue) == 1);
+        mu_assert("test_single_thread_schedule_handle: Testing driver value failed", string_equal(peek_queue(driver->queue, 0), "Message1"));
+        mu_assert("test_single_thread_schedule_handle: Testing driver return failed", new_args->out == SUCCESS);
+	pthread_join(pid, NULL);
+        // Receivinge from the driver to unblock
+        void* out = NULL;
+        driver_handle(driver, &out);
+	mu_assert("test_single_thread_schedule_handle: Driver handle does not return correct message", string_equal(out, "Message1"));
+
+	driver_close(driver);
+        driver_destroy(driver);
+	destroy_schedule_struct(new_args);
+	sem_destroy(&schedule_done);
+	return NULL;
+}
+
+static char* test_single_thread_schedule_handle_non_blocking() {
+	print_test_details(__func__, "Testing the single thread schedule handle non blocking correctness");
+        size_t capacity = 2;
+        driver_t* driver = driver_create(capacity);
+
+        pthread_t pid[2];
+
+	handle_args* job_rec;
+
+        sem_t done;
+        sem_init(&done, 0, 0);
+
+        job_rec = create_object_for_handle_api(driver, &done);
+        pthread_create(&pid[0], NULL, (void *)helper_handle, job_rec);
+	
+	// ensure this thread is listening
+	usleep(1000);
+
+        sem_t schedule_done;
+        sem_init(&schedule_done, 0, 0);
+        // Send first Message
+        schedule_args *schedule_args = create_object_for_schedule_api(driver, "Message1", &schedule_done);
+        pthread_create(&pid[1], NULL, (void *)helper_non_blocking_schedule, schedule_args);
+
+	pthread_join(pid[0], NULL);	
+	pthread_join(pid[1], NULL);
+
+        mu_assert("test_handle_correctness: Testing queue size failed\n" , queue_current_size(driver->queue) == 0);
+        mu_assert("test_handle_correctness: Testing driver values failed\n", string_equal(job_rec->job, "Message1"));
+	destroy_handle_struct(job_rec);
+	destroy_schedule_struct(schedule_args);
+	sem_destroy(&done);
+	driver_close(driver);
+	driver_destroy(driver);
+
+        return NULL;
+}
+
+static char* test_single_thread_select() {
+print_test_details(__func__, "Testing the single thread select correctness");
+        size_t DRIVERS = 3;
+
+        pthread_t pid, pid_1;
+        driver_t* driver[DRIVERS];
+        select_t list[DRIVERS];
+
+        for (size_t i = 0; i < DRIVERS; i++) {
+                driver[i] = driver_create(1);
+                list[i].op = HANDLE;
+                list[i].driver = driver[i];
+        }
+
+        sem_t done;
+        sem_init(&done, 0, 0);
+        // Testing with empty drivers and handle API
+        select_args *args = create_object_for_select_api(list, DRIVERS, &done);
+        pthread_create(&pid, NULL, (void *)helper_select, args);
+
+        // To wait sometime before we check select is blocking now
+        usleep(100);
+        mu_assert("test_select: It isn't blocked as expected", args->out == DRIVER_GEN_ERROR);
+        //printf("set schedule\n");
+        driver_schedule(driver[2], "Message1");
+        sem_wait(&done);
+
+        // XXX: Code will go in infinite loop here if the select didn't return .
+        pthread_join(pid, NULL);
+
+        mu_assert("test_select: Returned value doesn't match", args->index == 2);
+
+        /* This part of code is to test select with multiple handles */
+        for (size_t i = 0; i < DRIVERS; i++) {
+                driver_schedule(driver[i], "Message");
+                list[i].op = SCHDLE;
+                list[i].job = "Message4";
+        }
+
+        select_args *args_1 = create_object_for_select_api(list, DRIVERS, &done);
+        pthread_create(&pid_1, NULL, (void *)helper_select, args_1);
+        // Before chekcing for block sleep
+        usleep(100);
+        mu_assert("test_select: It isn't blocked as expected", args_1->out == DRIVER_GEN_ERROR);
+        void* job;
+        driver_handle(driver[0], &job);
+        sem_wait(&done);
+
+
+        // XXX: Code will go in infinite loop here if the select didn't return .
+        pthread_join(pid_1, NULL);
+        mu_assert("test_select: Returned value doesn't match", args_1->index == 0);
+
+        pthread_create(&pid_1, NULL, (void *)helper_select, args_1);
+        usleep(10000);
+        driver_close(driver[0]);
+        //printf("wake up");
+        pthread_join(pid_1, NULL);
+        mu_assert("test_select: Driver is closed, it should propogate the same error", args_1->out == DRIVER_CLOSED_ERROR);
+
+        size_t index;
+        mu_assert("test_select: Select on closed driver should return DRIVER_CLOSED_ERROR", driver_select(list, DRIVERS, &index) == DRIVER_CLOSED_ERROR);
+
+        destroy_select_struct(args);
+        // Since destroy select struct deleted the list already
+        free(args_1);
+
+        for (size_t i = 0; i < DRIVERS; i++) {
+                driver_close(driver[i]);
+                driver_destroy(driver[i]);
+        }
+        sem_destroy(&done);
+
+        return NULL;
+}
+
 static char* test_schedule_correctness() {
 	print_test_details(__func__, "Testing the schedule correctness");
 
@@ -424,10 +570,12 @@ static char* test_non_blocking_schedule() {
 
 	size_t schedule_count = 0;
 	for (size_t i = 0; i < SCHDLE_THREAD; i++) {
+printf("job_schedule: %d\n",job_schedule[i]->out);
 		if (job_schedule[i]->out == DRIVER_REQUEST_FULL) {
 			schedule_count ++;
 		}
 	}
+printf("sc: %zu\n",schedule_count);
 	mu_assert("test_non_blocking_schedule: Testing driver schedule return value failed" , (schedule_count == SCHDLE_THREAD - capacity));
 
 	for (size_t i = 0; i < SCHDLE_THREAD; i++) {
@@ -560,7 +708,7 @@ static char* test_driver_close_with_schedule() {
 	}
 
 	driver_close(driver);
-
+printf("closed driver\n");
 	// XXX: All the threads should return in finite amount of time else it will be in infinite loop. Hence incorrect implementation
 	for (size_t i = 0; i < SCHDLE_THREAD; i++) {
 		pthread_join(schedule_pid[i], NULL);    
@@ -572,7 +720,7 @@ static char* test_driver_close_with_schedule() {
 			count ++;
 		}
 	}
-
+printf("pass count\n");
 	mu_assert("test_driver_close: Testing driver close failed" , count == SCHDLE_THREAD - capacity);
 
 	// Making a normal schedule call to check if its closed
@@ -1048,6 +1196,7 @@ static char* test_zero_queue() {
 
 	for (size_t i = 0; i < RECEIVE_THREAD; i++) {
 		mu_assert("test_zero_queue: Testing driver handle return value failed" , job_rec[i]->out == SUCCESS);
+printf("%s\n",job_rec[i]->job);
 		mu_assert("test_zero_queue: Testing driver handle return job failed" , string_equal(job_rec[i]->job, "Message1"));
 	}
 
@@ -1106,6 +1255,7 @@ static char* test_zero_queue_non_blocking() {
 
 	pthread_join(r_pid, NULL);
 	mu_assert("test_zero_queue_non_blocking: Testing driver non blocking queue", rec_->out == SUCCESS);
+//printf("%s\n",rec_->job);
 	mu_assert("test_zero_queue_non_blocking: Testing driver non blocking queue", string_equal(rec_->job, "Message_1"));
 
 	destroy_handle_struct(rec_);
@@ -1131,7 +1281,8 @@ static char* test_zero_queue_non_blocking() {
 	schedule_args *job_schedule[SCHDLE_THREAD];
 	for (size_t i = 0; i < SCHDLE_THREAD; i++) {
 		job_schedule[i] = create_object_for_schedule_api(driver, "Message1", NULL);
-		pthread_create(&schedule_pid[i], NULL, (void *)helper_non_blocking_schedule, job_schedule[i]);  
+		pthread_create(&schedule_pid[i], NULL, (void *)helper_non_blocking_schedule, job_schedule[i]);
+
 	}
 
 	for (size_t i = 0; i < RECEIVE_THREAD; i++) {
@@ -1140,10 +1291,12 @@ static char* test_zero_queue_non_blocking() {
 
 	for (size_t i = 0; i < SCHDLE_THREAD; i++){
 		pthread_join(schedule_pid[i], NULL);
+//printf("%zu\n",i); 
 	}
 
 	int count = 0;
 	for (size_t i = 0; i < SCHDLE_THREAD; i++) {
+printf("%d\n",job_schedule[i]->out);
 		if (job_schedule[i]->out == DRIVER_REQUEST_FULL) {
 			count ++;
 		}
@@ -1156,7 +1309,7 @@ static char* test_zero_queue_non_blocking() {
 	for (size_t i = 0; i < SCHDLE_THREAD; i++) {
 		destroy_schedule_struct(job_schedule[i]);
 	}
-
+printf("count:%d\n",count);
 	mu_assert("test_zero_queue_non_blocking: Testing driver non blocking queue" , count == 8);
 
 	driver_close(driver);
@@ -1213,7 +1366,7 @@ static char* test_for_basic_global_declaration() {
 		args[i] = create_object_for_select_api(list, 1, NULL);
 		pthread_create(&pid[i], NULL, (void *)helper_select, args[i]);
 	}
-
+    printf("create select1\n");
 	// To wait sometime before we check select is blocking now.
 	select_args *args1;
 	args1 = create_object_for_select_api(list1, 1, NULL);
@@ -1244,7 +1397,7 @@ static char* test_for_basic_global_declaration() {
 	getrusage(RUSAGE_SELF, &usage2);
 	struct timeval end = usage2.ru_utime;
 	struct timeval end_s = usage2.ru_stime;
-
+  //printf("passed driver1 reused\n");
 	long double result = (end.tv_sec - start.tv_sec)*1000000L + end.tv_usec - start.tv_usec + (end_s.tv_sec - start_s.tv_sec)*1000000L + end_s.tv_usec - start_s.tv_usec;
 	mu_assert("test_for_basic_global_declaration: CPU Utilization is higher than required", result < 10000000);
 
@@ -1393,14 +1546,14 @@ static char* test_select_with_select(size_t capacity) {
 	select_args *args = create_object_for_select_api(list[1], DRIVERS, NULL);
 
 	pthread_create(&pid, NULL, (void *)helper_select, args);
-
+    printf("select 1 appeared\n");
 	// To wait sometime before we check select is blocking now  
 	usleep(10000);
 	mu_assert("test_select_with_select: It isn't blocked as expected", args->out == DRIVER_GEN_ERROR);
 
 	select_args *args1 = create_object_for_select_api(list[0], DRIVERS, NULL);
 	pthread_create(&pid_1, NULL, (void *)helper_select, args1);
-
+     printf("select 2 appeared\n");
 	pthread_join(pid_1, NULL);
 	pthread_join(pid, NULL);
 
@@ -1655,7 +1808,11 @@ typedef struct {
 	test_fn_t test;
 	int grade;
 } grade_t;
-test_t tests[] = {{"test_initialization", test_initialization},
+test_t tests[] = {
+	{"test_single_thread_schedule_handle", test_single_thread_schedule_handle},
+	{"test_single_thread_schedule_handle_non_blocking", test_single_thread_schedule_handle_non_blocking},
+	{"test_single_thread_select",test_single_thread_select},
+	{"test_initialization", test_initialization},
 	{"test_schedule_correctness", test_schedule_correctness},
 	{"test_handle_correctness", test_handle_correctness},
 	{"test_non_blocking_schedule", test_non_blocking_schedule},

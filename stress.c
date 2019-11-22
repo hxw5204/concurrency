@@ -172,6 +172,8 @@ void* router(void* arg)
                     // update next_state with new job
                     distance_vector_t* neighbor_state = select_list[selected_index].job;
                     distance_t neighbor_dist = get_link_distance(index, neighbor_state->src);
+printf("index: %zu  neighbor_state->src: %zu\n",index, neighbor_state->src);
+printf("mine index:%u inf index:%zu\n",neighbor_dist,selected_index);
                     assert(neighbor_dist != inf_distance);
                     for (size_t i = 0; i < num_driver; i++) {
                         distance_t new_dist = neighbor_dist + neighbor_state->dist[i];
